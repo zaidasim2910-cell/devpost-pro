@@ -1,0 +1,530 @@
+{
+  "name": "DevPost Pro - Analyze Workflow (v4)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "analyze",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "c80108c8-b25f-46d1-a191-841ae032342f",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        400,
+        288
+      ],
+      "webhookId": "c1741971-223b-4b5f-8942-1dddeb8da18b"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body;\n\nconst githubUrl = body.github_url.trim().replace(/\\/$/, '');\nconst githubParts = githubUrl.replace('https://github.com/', '').split('/');\nconst githubOwner = githubParts[0];\nconst githubRepo = githubParts[1];\n\nconst linkedinUrl = (body.linkedin_url || '').trim().replace(/\\/$/, '');\nconst linkedinUsername = linkedinUrl.split('/in/')[1]?.replace('/', '') || '';\n\nif (!githubOwner || !githubRepo) {\n  throw new Error('Invalid GitHub URL format. Expected: https://github.com/username/repo');\n}\n\nreturn [{\n  json: {\n    github_owner: githubOwner,\n    github_repo: githubRepo,\n    github_url: githubUrl,\n    linkedin_url: linkedinUrl,\n    linkedin_username: linkedinUsername,\n    tone: body.tone || 'professional',\n    linkedin_access_token: body.linkedin_access_token || '',\n    linkedin_user_id: body.linkedin_user_id || '',\n    linkedin_profile_name: body.linkedin_profile_name || '',\n    linkedin_profile_headline: body.linkedin_profile_headline || '',\n    linkedin_profile_location: body.linkedin_profile_location || ''\n  }\n}];"
+      },
+      "id": "77836653-f9d4-461e-895f-0bc5810e37cd",
+      "name": "Input Parser",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        624,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.github.com/repos/{{$json.github_owner}}/{{$json.github_repo}}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "20c018ac-4ac0-46e4-859a-853fac912bef",
+      "name": "GitHub Get Repo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        848,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "skn7h5mtUmKvVMOB",
+          "name": "GitHub PAT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://api.github.com/repos/{{$json.github_owner}}/{{$json.github_repo}}/contributors",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "ebf8ab15-d81b-4419-9f46-7531c7ff0a07",
+      "name": "GitHub Get Contributors",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        848,
+        192
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "skn7h5mtUmKvVMOB",
+          "name": "GitHub PAT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://api.github.com/repos/{{$json.github_owner}}/{{$json.github_repo}}/commits?per_page=30",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "b9c697f5-3249-4bd7-9acc-3abc319bbf64",
+      "name": "GitHub Get Commits",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        848,
+        384
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "skn7h5mtUmKvVMOB",
+          "name": "GitHub PAT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://api.github.com/repos/{{$json.github_owner}}/{{$json.github_repo}}/readme",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "5a1e90b1-7dee-41eb-9c1e-a2d9cfdf63e1",
+      "name": "GitHub Get README",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        848,
+        576
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "skn7h5mtUmKvVMOB",
+          "name": "GitHub PAT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const allItems = $input.all().map((item) => item.json);\n\nconst repoData =\n  allItems.find((item) => item.full_name !== undefined && !Array.isArray(item)) || {};\nconst contributorsData = allItems.filter((item) => item.login !== undefined);\nconst commitsData = allItems.filter((item) => item.commit !== undefined);\nconst readmeItem =\n  allItems.find((item) => item.encoding || item.download_url || item.content || item.body) || null;\n\nconst inputData = $('Input Parser').first().json;\n\nfunction decodeReadme(item) {\n  if (!item) return '';\n  if (typeof item === 'string') return item;\n\n  const raw = item.content || item.body || item.data || '';\n  if (typeof raw !== 'string' || !raw) return '';\n\n  if (String(item.encoding || '').toLowerCase() === 'base64') {\n    try {\n      return Buffer.from(raw.replace(/\\n/g, ''), 'base64').toString('utf8');\n    } catch {\n      return raw;\n    }\n  }\n\n  return raw;\n}\n\nfunction stripMarkdown(markdown) {\n  return String(markdown || '')\n    .replace(/```[\\s\\S]*?```/g, ' ')\n    .replace(/`([^`]+)`/g, '$1')\n    .replace(/!\\[[^\\]]*\\]\\([^)]+\\)/g, ' ')\n    .replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g, '$1 $2')\n    .replace(/^#{1,6}\\s*/gm, '')\n    .replace(/^\\s*[-*+]\\s+/gm, '')\n    .replace(/^\\s*\\d+\\.\\s+/gm, '')\n    .replace(/[>*_~]/g, ' ')\n    .replace(/\\r/g, '')\n    .replace(/\\n{3,}/g, '\\n\\n')\n    .replace(/[ \\t]{2,}/g, ' ')\n    .trim();\n}\n\nconst readmeRaw = decodeReadme(readmeItem);\nconst readmePlain = stripMarkdown(readmeRaw);\nconst readmeLength = readmePlain.length;\nconst hasDemo =\n  /(demo|walkthrough|preview|video|streamlit|vercel|netlify|deploy|live)/i.test(readmePlain) ||\n  Boolean(repoData.homepage);\n\nlet githubScore = 0;\nconst flags = [];\nconst warnings = [];\n\nif (repoData.fork === true) {\n  flags.push('FORKED_REPO');\n} else {\n  githubScore += 26;\n}\n\nconst contributorCount = contributorsData.length;\nconst ownerContributor = contributorsData.find(\n  (contributor) =>\n    contributor.login &&\n    contributor.login.toLowerCase() === String(inputData.github_owner).toLowerCase()\n);\n\nif (contributorCount <= 1) {\n  githubScore += 18;\n} else if (contributorCount <= 3 && ownerContributor) {\n  githubScore += 12;\n  warnings.push('MULTI_CONTRIBUTOR');\n} else {\n  githubScore += 6;\n  warnings.push('TEAM_PROJECT');\n}\n\nconst commitCount = commitsData.length;\nif (commitCount >= 15) {\n  githubScore += 18;\n} else if (commitCount >= 5) {\n  githubScore += 12;\n} else if (commitCount >= 1) {\n  githubScore += 8;\n} else {\n  flags.push('INSUFFICIENT_COMMITS');\n}\n\nif (readmeLength >= 1200) {\n  githubScore += 22;\n} else if (readmeLength >= 400) {\n  githubScore += 18;\n} else if (readmeLength >= 150) {\n  githubScore += 12;\n  warnings.push('README_COULD_BE_BETTER');\n} else if (readmeLength > 0) {\n  githubScore += 6;\n  warnings.push('MINIMAL_README');\n} else {\n  flags.push('NO_README');\n}\n\nconst repoSize = Number(repoData.size || 0);\nif (repoSize > 10) {\n  githubScore += 10;\n} else if (repoSize > 1) {\n  githubScore += 6;\n  warnings.push('SMALL_REPO');\n} else {\n  flags.push('EMPTY_REPO');\n}\n\nif ((repoData.stargazers_count || 0) > 0) {\n  githubScore += Math.min(Number(repoData.stargazers_count || 0), 4);\n}\n\nif (hasDemo) {\n  githubScore += 4;\n}\n\nif (Array.isArray(repoData.topics) && repoData.topics.length > 0) {\n  githubScore += 2;\n}\n\nreturn [\n  {\n    json: {\n      ...inputData,\n      github_score: Math.min(githubScore, 100),\n      github_flags: flags,\n      github_warnings: warnings,\n      repo_meta: {\n        name: repoData.name || inputData.github_repo,\n        full_name: repoData.full_name || `${inputData.github_owner}/${inputData.github_repo}`,\n        description: repoData.description || '',\n        language: repoData.language || 'Not specified',\n        stars: repoData.stargazers_count || 0,\n        created_at: repoData.created_at || '',\n        updated_at: repoData.updated_at || '',\n        homepage: repoData.homepage || '',\n        topics: repoData.topics || [],\n        is_fork: Boolean(repoData.fork),\n        contributor_count: contributorCount,\n        commit_count: commitCount,\n        default_branch: repoData.default_branch || 'main',\n        size: repoSize\n      },\n      readme_content: readmePlain,\n      readme_raw: readmeRaw,\n      has_demo_link: hasDemo\n    }\n  }\n];"
+      },
+      "id": "57eb528f-5b3e-4deb-b191-6127350f963a",
+      "name": "GitHub Validation Scorer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1296,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $('GitHub Validation Scorer').first().json;\n\nconst linkedinUrl = String(data.linkedin_url || '').trim();\nconst name = String(data.linkedin_profile_name || '').trim() || 'Professional';\nconst headline = String(data.linkedin_profile_headline || '').trim() || 'IT Professional';\nconst location = String(data.linkedin_profile_location || '').trim();\n\nlet linkedinScore = 35;\nconst linkedinWarnings = [];\n\nif (linkedinUrl) {\n  linkedinScore += 15;\n} else {\n  linkedinWarnings.push('LINKEDIN_URL_MISSING');\n}\n\nif (name && name !== 'Professional') {\n  linkedinScore += 20;\n} else {\n  linkedinWarnings.push('LINKEDIN_NAME_MISSING');\n}\n\nif (headline && headline !== 'IT Professional') {\n  linkedinScore += 20;\n} else {\n  linkedinWarnings.push('LINKEDIN_HEADLINE_MISSING');\n}\n\nif (location) {\n  linkedinScore += 10;\n}\n\nreturn [\n  {\n    json: {\n      ...data,\n      linkedin_score: Math.min(linkedinScore, 100),\n      linkedin_flags: [],\n      linkedin_warnings: linkedinWarnings,\n      linkedin_scrape_success: Boolean(linkedinUrl),\n      linkedin_profile: {\n        name,\n        headline,\n        location,\n        connection_count: 0,\n        profile_exists: Boolean(linkedinUrl)\n      }\n    }\n  }\n];"
+      },
+      "id": "95ca80cb-9165-42de-aa3d-d527b8f273ab",
+      "name": "LinkedIn Profile Builder",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1520,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n\nconst githubWeighted = (data.github_score / 100) * 75;\nconst linkedinWeighted = (data.linkedin_score / 100) * 25;\nconst totalScore = Math.round(githubWeighted + linkedinWeighted);\n\nlet trustLevel = '';\nlet trustBadge = '';\nlet proceedToGeneration = false;\nlet rejectionReason = '';\n\nconst allFlags = [...(data.github_flags || []), ...(data.linkedin_flags || [])];\nconst warningCodes = [...(data.github_warnings || []), ...(data.linkedin_warnings || [])];\n\nif (allFlags.includes('FORKED_REPO')) {\n  trustLevel = 'REJECTED';\n  rejectionReason =\n    'This repository appears to be a fork. DevPost Pro only generates content for original work.';\n} else if (allFlags.includes('EMPTY_REPO')) {\n  trustLevel = 'REJECTED';\n  rejectionReason =\n    'This repository appears to be empty or too small to analyze meaningfully. Add more project material and try again.';\n} else if (allFlags.includes('INSUFFICIENT_COMMITS')) {\n  trustLevel = 'REJECTED';\n  rejectionReason =\n    'This repository does not have enough commit history yet. Add at least one meaningful commit before generating posts.';\n} else if (totalScore >= 80) {\n  trustLevel = 'HIGH';\n  trustBadge = 'VERIFIED';\n  proceedToGeneration = true;\n} else if (totalScore >= 60) {\n  trustLevel = 'MEDIUM';\n  trustBadge = 'STANDARD';\n  proceedToGeneration = true;\n} else if (totalScore >= 45) {\n  trustLevel = 'LOW';\n  trustBadge = 'BASIC';\n  proceedToGeneration = true;\n} else {\n  trustLevel = 'REJECTED';\n  rejectionReason = `This project scored ${totalScore}/100 on the credibility check. Strengthen the README, commit history, or project substance and try again.`;\n}\n\nconst warningMap = {\n  MULTI_CONTRIBUTOR: 'Multiple contributors detected',\n  TEAM_PROJECT: 'Team project detected',\n  README_COULD_BE_BETTER: 'README could be more detailed',\n  MINIMAL_README: 'README is minimal',\n  SMALL_REPO: 'Repository is still small',\n  LINKEDIN_URL_MISSING: 'LinkedIn URL is missing',\n  LINKEDIN_NAME_MISSING: 'Profile name is missing',\n  LINKEDIN_HEADLINE_MISSING: 'Profile headline is missing'\n};\n\nconst warningMessages = [...new Set(warningCodes.map((code) => warningMap[code] || code))];\n\nconst readmePass = !allFlags.includes('NO_README') && !warningCodes.includes('MINIMAL_README');\n\nconst scoreBreakdown = {\n  total: totalScore,\n  github_component: Math.round(githubWeighted),\n  linkedin_component: Math.round(linkedinWeighted),\n  checks: {\n    is_original_work: !allFlags.includes('FORKED_REPO'),\n    solo_or_lead_author: !warningCodes.includes('TEAM_PROJECT'),\n    has_commit_history: !allFlags.includes('INSUFFICIENT_COMMITS'),\n    readme_quality: readmePass,\n    linkedin_profile_real: Boolean(data.linkedin_url)\n  },\n  warnings: warningMessages\n};\n\nreturn [\n  {\n    json: {\n      ...data,\n      trust_score: totalScore,\n      trust_level: trustLevel,\n      trust_badge: trustBadge,\n      proceed_to_generation: proceedToGeneration,\n      rejection_reason: rejectionReason,\n      score_breakdown: scoreBreakdown\n    }\n  }\n];"
+      },
+      "id": "e5e1d43c-d836-419e-a939-410dc05593c9",
+      "name": "Trust Score Engine",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1744,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.proceed_to_generation}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "a3cb20e0-5633-4037-8422-fce1f2720a39",
+      "name": "IF Gate",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1968,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n\nreturn [{\n  json: {\n    status: 'rejected',\n    trust_score: data.trust_score,\n    score_breakdown: data.score_breakdown,\n    rejection_reason: data.rejection_reason,\n    repo_meta: data.repo_meta,\n    linkedin_profile: data.linkedin_profile\n  }\n}];"
+      },
+      "id": "2a494bb0-caf1-46c9-8a05-65b058a953ca",
+      "name": "Rejection Response Builder",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2864,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst readme = String(data.readme_content || '');\nconst repoMeta = data.repo_meta || {};\n\nfunction cleanSentence(text, maxLength = 220) {\n  return String(text || '')\n    .replace(/\\s+/g, ' ')\n    .trim()\n    .slice(0, maxLength)\n    .replace(/[,:;.\\- ]+$/, '');\n}\n\nfunction dedupe(values) {\n  return [...new Set(values.filter(Boolean))];\n}\n\nconst techPatterns = {\n  languages: ['Python', 'JavaScript', 'TypeScript', 'Java', 'Go', 'Rust', 'C++', 'C#', 'PHP', 'Ruby', 'Swift', 'Kotlin', 'R', 'Scala'],\n  frontend: ['React', 'Next.js', 'Vue', 'Angular', 'Svelte', 'Tailwind', 'HTML', 'CSS', 'Bootstrap'],\n  backend: ['Node.js', 'Express', 'FastAPI', 'Django', 'Flask', 'Spring', 'NestJS', 'Laravel'],\n  databases: ['PostgreSQL', 'MySQL', 'MongoDB', 'Redis', 'SQLite', 'Supabase', 'Firebase', 'Pinecone', 'Chroma'],\n  cloud: ['AWS', 'Azure', 'GCP', 'Vercel', 'Netlify', 'Docker', 'Kubernetes', 'Streamlit'],\n  ai_ml: ['OpenAI', 'LangChain', 'RAG', 'LLM', 'Gemini', 'GPT', 'PyTorch', 'TensorFlow', 'scikit-learn', 'pandas', 'numpy'],\n  tools: ['GitHub Actions', 'REST API', 'GraphQL', 'OAuth', 'JWT', 'n8n']\n};\n\nconst combinedText = [\n  readme,\n  repoMeta.description || '',\n  repoMeta.language || '',\n  Array.isArray(repoMeta.topics) ? repoMeta.topics.join(' ') : ''\n]\n  .join('\\n')\n  .toLowerCase();\n\nconst detectedTech = {};\nfor (const [category, techs] of Object.entries(techPatterns)) {\n  const found = techs.filter((tech) => combinedText.includes(tech.toLowerCase()));\n  if (found.length > 0) {\n    detectedTech[category] = found;\n  }\n}\n\nif (\n  repoMeta.language &&\n  !Object.values(detectedTech)\n    .flat()\n    .map((tech) => tech.toLowerCase())\n    .includes(String(repoMeta.language).toLowerCase())\n) {\n  detectedTech.languages = [...(detectedTech.languages || []), repoMeta.language];\n}\n\nconst techStackFlat = dedupe(Object.values(detectedTech).flat());\n\nconst rawLines = readme\n  .split('\\n')\n  .map((line) => line.trim())\n  .filter(Boolean);\n\nconst proseLines = rawLines.filter(\n  (line) =>\n    !line.startsWith('#') &&\n    !/^[-*+]\\s/.test(line) &&\n    !/^\\d+\\.\\s/.test(line) &&\n    line.length > 30\n);\n\nconst bulletLines = rawLines\n  .filter((line) => /^[-*+]\\s/.test(line))\n  .map((line) => cleanSentence(line.replace(/^[-*+]\\s*/, ''), 100))\n  .filter((line) => line.length > 12);\n\nconst summarySeed =\n  proseLines.slice(0, 3).join(' ') || repoMeta.description || repoMeta.name || 'GitHub project';\n\nconst goalLine =\n  proseLines.find((line) =>\n    /(helps|solve|automate|designed to|built to|allows|enables|streamline|platform|tool|dashboard)/i.test(line)\n  ) || summarySeed;\n\nconst audienceSource = [repoMeta.description || '', ...proseLines].join(' ');\nconst audienceMatch = audienceSource.match(/\\bfor\\s+([A-Za-z0-9,&/()\\- ]{4,80})/i);\nconst targetUsers = audienceMatch\n  ? cleanSentence(audienceMatch[1], 70)\n  : 'IT and CS professionals';\n\nconst featureCandidates = dedupe([\n  ...bulletLines,\n  ...proseLines\n    .filter((line) => /(feature|supports|includes|pipeline|workflow|dashboard|automation|analysis|generation|upload|deployment|api)/i.test(line))\n    .map((line) => cleanSentence(line, 100))\n]);\n\nconst keyFeatures = featureCandidates.slice(0, 3);\n\nconst proofPoints = dedupe([\n  repoMeta.language && repoMeta.language !== 'Not specified' ? `Built with ${repoMeta.language}` : '',\n  techStackFlat.length ? `Uses ${techStackFlat.slice(0, 3).join(', ')}` : '',\n  Number(repoMeta.commit_count || 0) > 0 ? `${repoMeta.commit_count} commits on GitHub` : '',\n  Number(repoMeta.contributor_count || 0) > 0\n    ? `${repoMeta.contributor_count} contributor${Number(repoMeta.contributor_count) === 1 ? '' : 's'}`\n    : '',\n  data.has_demo_link ? 'Demo or deployment link available' : '',\n  repoMeta.homepage ? `Homepage: ${repoMeta.homepage}` : ''\n]).slice(0, 4);\n\nconst projectContext = {\n  headline: cleanSentence(repoMeta.name || summarySeed, 80),\n  target_users: targetUsers,\n  value_prop: cleanSentence(goalLine || summarySeed, 180),\n  key_features: keyFeatures,\n  proof_points: proofPoints,\n  demo_url: repoMeta.homepage || '',\n  README_excerpt: cleanSentence(summarySeed, 260)\n};\n\nreturn [\n  {\n    json: {\n      ...data,\n      tech_stack: detectedTech,\n      tech_stack_flat: techStackFlat,\n      project_summary: cleanSentence(summarySeed, 260),\n      readme_cleaned: readme.slice(0, 5000),\n      project_context: projectContext\n    }\n  }\n];"
+      },
+      "id": "ab2c9022-e879-4bbe-ad92-98f91dd0f460",
+      "name": "Tech Stack Extractor",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2192,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n\nfunction escapeHtml(value) {\n  return String(value || '')\n    .replace(/&/g, '&amp;')\n    .replace(/</g, '&lt;')\n    .replace(/>/g, '&gt;')\n    .replace(/\"/g, '&quot;')\n    .replace(/'/g, '&#39;');\n}\n\nconst creative = data.generated_posts?.creative_brief || {};\nconst highlights = [\n  creative.highlight_1,\n  creative.highlight_2,\n  creative.highlight_3\n].filter(Boolean).slice(0, 3);\n\nconst imageCardData = {\n  title: creative.headline || data.repo_meta.name,\n  description: creative.subheadline || data.project_summary,\n  tech_stack: (data.tech_stack_flat || []).slice(0, 6),\n  author_name: data.linkedin_profile.name,\n  author_role: data.linkedin_profile.headline,\n  language: data.repo_meta.language,\n  stars: data.repo_meta.stars,\n  trust_badge: data.trust_badge,\n  trust_score: data.trust_score,\n  github_url: data.github_url,\n  proof_line: creative.proof_line || '',\n  audience: creative.audience || '',\n  highlights\n};\n\nconst badgeColor =\n  data.trust_badge === 'VERIFIED'\n    ? '#059669'\n    : data.trust_badge === 'STANDARD'\n      ? '#d97706'\n      : '#ea580c';\n\nconst badgeText =\n  data.trust_badge === 'VERIFIED'\n    ? 'Verified Work'\n    : data.trust_badge === 'STANDARD'\n      ? 'Authenticated'\n      : 'Profile-backed';\n\nconst techBadges = imageCardData.tech_stack\n  .map(\n    (tech) =>\n      `<span style=\"background:#dbeafe;color:#1d4ed8;padding:8px 14px;border-radius:999px;font-size:15px;font-weight:600\">${escapeHtml(tech)}</span>`\n  )\n  .join('');\n\nconst highlightBlocks = highlights\n  .map(\n    (item) =>\n      `<div style=\"flex:1;min-width:0;background:rgba(255,255,255,0.06);border:1px solid rgba(148,163,184,0.24);border-radius:18px;padding:18px\"><div style=\"color:#e2e8f0;font-size:18px;font-weight:600;line-height:1.35\">${escapeHtml(item)}</div></div>`\n  )\n  .join('');\n\nconst imageHtml = `<div style=\"width:1200px;height:630px;background:linear-gradient(135deg,#0f172a 0%,#172554 45%,#1e293b 100%);padding:52px;display:flex;flex-direction:column;justify-content:space-between;font-family:Inter,Segoe UI,Arial,sans-serif;box-sizing:border-box\">\n  <div style=\"display:flex;justify-content:space-between;align-items:flex-start;gap:24px\">\n    <div>\n      <div style=\"color:#93c5fd;font-size:18px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase\">DevPost Pro</div>\n      <div style=\"color:#94a3b8;font-size:18px;margin-top:12px\">${escapeHtml(creative.eyebrow || 'Project spotlight')}</div>\n    </div>\n    <div style=\"background:${badgeColor};color:white;padding:10px 18px;border-radius:999px;font-size:15px;font-weight:700\">${escapeHtml(badgeText)}</div>\n  </div>\n\n  <div style=\"display:flex;flex-direction:column;gap:18px\">\n    <h1 style=\"margin:0;color:white;font-size:54px;line-height:1.05;font-weight:800;max-width:920px\">${escapeHtml(imageCardData.title).slice(0, 120)}</h1>\n    <p style=\"margin:0;color:#cbd5e1;font-size:24px;line-height:1.4;max-width:940px\">${escapeHtml(imageCardData.description).slice(0, 180)}</p>\n    ${imageCardData.audience ? `<div style=\"color:#93c5fd;font-size:18px;font-weight:600\">Built for ${escapeHtml(imageCardData.audience).slice(0, 80)}</div>` : ''}\n  </div>\n\n  <div style=\"display:flex;flex-direction:column;gap:18px\">\n    ${highlightBlocks ? `<div style=\"display:flex;gap:16px\">${highlightBlocks}</div>` : ''}\n    <div style=\"display:flex;justify-content:space-between;align-items:flex-end;gap:24px\">\n      <div>\n        <div style=\"display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px\">${techBadges}</div>\n        <div style=\"color:#e2e8f0;font-size:20px;font-weight:600\">${escapeHtml(imageCardData.author_name)}</div>\n        <div style=\"color:#94a3b8;font-size:18px;margin-top:6px\">${escapeHtml(imageCardData.author_role)}</div>\n      </div>\n      <div style=\"text-align:right;max-width:360px\">\n        <div style=\"color:#cbd5e1;font-size:18px;font-weight:600\">${escapeHtml(imageCardData.proof_line).slice(0, 90)}</div>\n        <div style=\"color:#64748b;font-size:16px;margin-top:8px\">${escapeHtml(data.repo_meta.name)}</div>\n      </div>\n    </div>\n  </div>\n</div>`;\n\nreturn [\n  {\n    json: {\n      ...data,\n      image_card: {\n        html: imageHtml,\n        data: imageCardData\n      }\n    }\n  }\n];"
+      },
+      "id": "fdb8d614-d2da-42c7-be9d-4540307ee52e",
+      "name": "Image Card Builder",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3072,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n\nif (data.status === 'rejected') {\n  return [{ json: data }];\n}\n\nreturn [\n  {\n    json: {\n      status: 'success',\n      trust: {\n        score: data.trust_score,\n        level: data.trust_level,\n        badge: data.trust_badge,\n        breakdown: data.score_breakdown\n      },\n      profile: {\n        github: {\n          repo_name: data.repo_meta.name,\n          description: data.repo_meta.description,\n          language: data.repo_meta.language,\n          stars: data.repo_meta.stars,\n          contributors: data.repo_meta.contributor_count,\n          commits: data.repo_meta.commit_count,\n          is_fork: data.repo_meta.is_fork,\n          url: data.github_url\n        },\n        linkedin: data.linkedin_profile\n      },\n      tech_stack: data.tech_stack,\n      tech_stack_flat: data.tech_stack_flat,\n      posts: {\n        technical: { ...data.generated_posts.post_technical, id: 'technical' },\n        story: { ...data.generated_posts.post_story, id: 'story' },\n        announcement: { ...data.generated_posts.post_announcement, id: 'announcement' }\n      },\n      recruiter_scores: data.generated_posts.recruiter_score,\n      image_card: data.image_card,\n      generated_at: data.generation_timestamp\n    }\n  }\n];"
+      },
+      "id": "4f18909a-7770-4f27-9667-11571db42eac",
+      "name": "Final Response Builder",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3296,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "numberInputs": 4
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1072,
+        256
+      ],
+      "id": "7aec82de-7b89-4a40-b9a4-04873f21d1bc",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.mistral.ai/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "content-type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer CzMqWSqX94f8c2OGrgqNBC0P4YrZQien"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.mistral_request_body) }}",
+        "options": {}
+      },
+      "id": "66210d12-6469-48fa-9d4a-df341f196ba6",
+      "name": "AI Post Generator",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        2624,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const mistralResponse = $input.first().json;\nconst prevData = $('Tech Stack Extractor').first().json;\n\n// Mistral response path\nconst responseText = mistralResponse.choices[0].message.content;\n\nlet posts;\ntry {\n  const cleaned = responseText.replace(/```json|```/g, '').trim();\n  posts = JSON.parse(cleaned);\n} catch(e) {\n  const jsonMatch = responseText.match(/\\{[\\s\\S]*\\}/);\n  if (jsonMatch) {\n    posts = JSON.parse(jsonMatch[0]);\n  } else {\n    throw new Error('Mistral did not return valid JSON. Response: ' + responseText.substring(0, 300));\n  }\n}\n\nreturn [{\n  json: {\n    ...prevData,\n    generated_posts: posts,\n    generation_timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "6a7950a4-8fb2-4cd0-8b2e-910afe1238bf",
+      "name": "Response Parser",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2848,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n\nconst prompt = `You are an expert LinkedIn content strategist for IT professionals. Generate 3 LinkedIn posts for this developer's GitHub project. Return ONLY raw JSON — no markdown, no backticks, no explanation.\n\nPROFESSIONAL CONTEXT:\n- Name: ${data.linkedin_profile?.name || 'Professional'}\n- Role: ${data.linkedin_profile?.headline || 'IT Professional'}\n- Location: ${data.linkedin_profile?.location || ''}\n- Tone: ${data.tone || 'professional'}\n\nPROJECT DATA:\n- Repo: ${data.repo_meta?.name || ''}\n- Description: ${data.repo_meta?.description || ''}\n- Language: ${data.repo_meta?.language || ''}\n- Stars: ${data.repo_meta?.stars || 0}\n- Tech stack: ${(data.tech_stack_flat || []).join(', ')}\n- Summary: ${data.project_summary || ''}\n- README excerpt: ${(data.readme_cleaned || '').substring(0, 1500)}\n\nReturn exactly this JSON structure with no extra text:\n{\n  \"post_technical\": {\n    \"content\": \"150-200 word technical deep-dive post. Bold hook. Explain problem solved and tech decisions. End with a question.\",\n    \"hashtags\": [\"#tag1\", \"#tag2\", \"#tag3\", \"#tag4\", \"#tag5\"],\n    \"post_type\": \"Technical Deep-Dive\",\n    \"best_time_to_post\": \"Tuesday-Thursday 8-10am\",\n    \"expected_reach\": \"High engagement from developers\"\n  },\n  \"post_story\": {\n    \"content\": \"150-200 word lessons-learned narrative. Personal challenge. The journey. Key takeaway.\",\n    \"hashtags\": [\"#tag1\", \"#tag2\", \"#tag3\", \"#tag4\", \"#tag5\"],\n    \"post_type\": \"Lessons Learned\",\n    \"best_time_to_post\": \"Monday 9am or Friday 12pm\",\n    \"expected_reach\": \"High engagement from career-focused audience\"\n  },\n  \"post_announcement\": {\n    \"content\": \"100-150 word project announcement. Lead with impact. Accessible to non-technical readers. CTA to check repo.\",\n    \"hashtags\": [\"#tag1\", \"#tag2\", \"#tag3\", \"#tag4\", \"#tag5\"],\n    \"post_type\": \"Project Announcement\",\n    \"best_time_to_post\": \"Wednesday 10am-12pm\",\n    \"expected_reach\": \"Broadest reach\"\n  },\n  \"recruiter_score\": {\n    \"technical_post\": 8,\n    \"story_post\": 7,\n    \"announcement_post\": 9,\n    \"reasoning\": \"Brief explanation of scores\"\n  }\n}`;\n\nconst mistralBody = {\n  model: \"mistral-small-latest\",\n  messages: [\n    {\n      role: \"user\",\n      content: prompt\n    }\n  ],\n  temperature: 0.7,\n  max_tokens: 2000\n};\n\nreturn [{\n  json: {\n    ...data,\n    mistral_request_body: mistralBody\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        192
+      ],
+      "id": "1f82144c-d3c9-4700-a84d-d3a9152c1cc2",
+      "name": "Build Mistral Prompt"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Input Parser",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Input Parser": {
+      "main": [
+        [
+          {
+            "node": "GitHub Get Repo",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "GitHub Get Contributors",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "GitHub Get Commits",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "GitHub Get README",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GitHub Get Repo": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GitHub Get Contributors": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "GitHub Validation Scorer": {
+      "main": [
+        [
+          {
+            "node": "LinkedIn Profile Builder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LinkedIn Profile Builder": {
+      "main": [
+        [
+          {
+            "node": "Trust Score Engine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trust Score Engine": {
+      "main": [
+        [
+          {
+            "node": "IF Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Gate": {
+      "main": [
+        [
+          {
+            "node": "Tech Stack Extractor",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Rejection Response Builder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tech Stack Extractor": {
+      "main": [
+        [
+          {
+            "node": "Build Mistral Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Image Card Builder": {
+      "main": [
+        [
+          {
+            "node": "Final Response Builder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rejection Response Builder": {
+      "main": [
+        [
+          {
+            "node": "Final Response Builder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "GitHub Validation Scorer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GitHub Get Commits": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "GitHub Get README": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "AI Post Generator": {
+      "main": [
+        [
+          {
+            "node": "Response Parser",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Response Parser": {
+      "main": [
+        [
+          {
+            "node": "Image Card Builder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Mistral Prompt": {
+      "main": [
+        [
+          {
+            "node": "AI Post Generator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "194fd886-6071-447f-8cf0-3268c063fbb6",
+  "meta": {
+    "instanceId": "b2134ef0028c72e63ea228556e0a3e3c0347a565ab970a500b0f67571db2bb4b"
+  },
+  "id": "v6V6ruIdYTcYvR2B",
+  "tags": []
+}

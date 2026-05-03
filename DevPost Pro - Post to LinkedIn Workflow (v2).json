@@ -1,0 +1,265 @@
+{
+  "name": "DevPost Pro - Post to LinkedIn Workflow (v2)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "post-to-linkedin",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "d439cc64-590a-4616-b778-90791b1727b7",
+      "name": "Webhook Post Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        2608,
+        -144
+      ],
+      "webhookId": "4e8d5488-e87f-45af-a63b-7487f2538863"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json.body;\n\nconst hashtags = Array.isArray(data.hashtags) ? data.hashtags : [];\nconst hashtagLine = hashtags.join(' ');\nconst repoLine = data.repo_url ? `\\n\\n${data.repo_url}` : '';\nconst fullContent = `${data.post_content}\\n\\n${hashtagLine}${repoLine}`.trim();\n\nreturn [\n  {\n    json: {\n      ...data,\n      full_post_content: fullContent\n    }\n  }\n];"
+      },
+      "id": "19f14a10-6c19-48fb-a2f9-7e2b35975721",
+      "name": "Combine Post Text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2832,
+        -144
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst base64 = String(data.image_base64 || '').replace(/^data:image\\/\\w+;base64,/, '');\n\nif (!base64) {\n  throw new Error('image_base64 is required for direct LinkedIn posting.');\n}\n\nconst fileName = `${String(data.repo_name || 'devpost-pro')\n  .toLowerCase()\n  .replace(/[^a-z0-9]+/g, '-')\n  .replace(/^-+|-+$/g, '') || 'devpost-pro'}.png`;\n\nreturn [\n  {\n    json: {\n      ...data\n    },\n    binary: {\n      image_upload: {\n        data: base64,\n        mimeType: 'image/png',\n        fileName\n      }\n    }\n  }\n];"
+      },
+      "id": "39c669bb-2d2a-4e0a-8f69-218e2ce6e26f",
+      "name": "Prepare Image Binary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3056,
+        -144
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.linkedin.com/v2/assets?action=registerUpload",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$json.access_token}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Restli-Protocol-Version",
+              "value": "2.0.0"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"registerUploadRequest\": {\n    \"recipes\": [\"urn:li:digitalmediaRecipe:feedshare-image\"],\n    \"owner\": \"{{$json.linkedin_user_id}}\",\n    \"serviceRelationships\": [\n      {\n        \"relationshipType\": \"OWNER\",\n        \"identifier\": \"urn:li:userGeneratedContent\"\n      }\n    ],\n    \"supportedUploadMechanism\": [\"SYNCHRONOUS_UPLOAD\"]\n  }\n}",
+        "options": {}
+      },
+      "id": "4c2b96f3-ae7f-40d2-8987-93d8fba0b177",
+      "name": "Register LinkedIn Image Upload",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        3280,
+        -144
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const registerResult = $input.first().json;\nconst prevData = $('Prepare Image Binary').first().json;\n\nconst uploadUrl = registerResult?.value?.uploadMechanism?.['com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest']?.uploadUrl;\nconst assetUrn = registerResult?.value?.asset;\n\nif (!uploadUrl) {\n  throw new Error('LinkedIn did not return an upload URL. Check your access token and LinkedIn user ID.');\n}\n\nreturn [{\n  json: {\n    ...prevData,\n    upload_url: uploadUrl,\n    asset_urn: assetUrn\n  }\n}];"
+      },
+      "id": "32676b03-16a3-465e-938a-80858c31f592",
+      "name": "Extract Upload URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3488,
+        -144
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{$json.upload_url}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$json.access_token}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "image/png"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "image_upload",
+        "options": {}
+      },
+      "id": "5c199033-e9bd-4dea-a72b-46cbd93fbf3e",
+      "name": "Upload Image to LinkedIn CDN",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        3712,
+        -144
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.linkedin.com/v2/ugcPosts",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$json.access_token}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Restli-Protocol-Version",
+              "value": "2.0.0"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"author\": \"{{$json.linkedin_user_id}}\",\n  \"lifecycleState\": \"PUBLISHED\",\n  \"specificContent\": {\n    \"com.linkedin.ugc.ShareContent\": {\n      \"shareCommentary\": {\n        \"text\": \"{{$json.full_post_content}}\"\n      },\n      \"shareMediaCategory\": \"IMAGE\",\n      \"media\": [\n        {\n          \"status\": \"READY\",\n          \"description\": {\n            \"text\": \"Project showcase by DevPost Pro\"\n          },\n          \"media\": \"{{$json.asset_urn}}\",\n          \"title\": {\n            \"text\": \"{{$json.repo_name}}\"\n          }\n        }\n      ]\n    }\n  },\n  \"visibility\": {\n    \"com.linkedin.ugc.MemberNetworkVisibility\": \"PUBLIC\"\n  }\n}",
+        "options": {}
+      },
+      "id": "24c28876-8312-4d3a-ba43-a5303e9b6d1a",
+      "name": "POST to LinkedIn UGC",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        3936,
+        -144
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const postResult = $input.first().json;\n\nreturn [{\n  json: {\n    status: 'posted',\n    post_id: postResult.id || '',\n    post_url: postResult.id ? `https://www.linkedin.com/feed/update/${postResult.id}` : 'https://www.linkedin.com/feed/',\n    message: 'Your post is now live on LinkedIn!'\n  }\n}];"
+      },
+      "id": "38e4f117-ea41-4503-ace8-bf48ed012259",
+      "name": "Post Success Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4160,
+        -144
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook Post Trigger": {
+      "main": [
+        [
+          {
+            "node": "Combine Post Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Combine Post Text": {
+      "main": [
+        [
+          {
+            "node": "Prepare Image Binary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Image Binary": {
+      "main": [
+        [
+          {
+            "node": "Register LinkedIn Image Upload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Register LinkedIn Image Upload": {
+      "main": [
+        [
+          {
+            "node": "Extract Upload URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Upload URL": {
+      "main": [
+        [
+          {
+            "node": "Upload Image to LinkedIn CDN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Image to LinkedIn CDN": {
+      "main": [
+        [
+          {
+            "node": "POST to LinkedIn UGC",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST to LinkedIn UGC": {
+      "main": [
+        [
+          {
+            "node": "Post Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "3bd42c51-57ae-4faf-a293-8b2af52c393d",
+  "meta": {
+    "instanceId": "b2134ef0028c72e63ea228556e0a3e3c0347a565ab970a500b0f67571db2bb4b"
+  },
+  "id": "rVfOr44rPqYepw4E",
+  "tags": []
+}

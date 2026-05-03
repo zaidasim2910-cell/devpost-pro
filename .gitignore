@@ -1,0 +1,12 @@
+.env
+.env.local
+node_modules/
+__pycache__/
+.next/
+*.pyc
+venv/
+.venv/
+
+# GitHub max file size 100MB
+AI Prod Dev Project.zip
+*.zip
