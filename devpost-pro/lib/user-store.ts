@@ -11,7 +11,10 @@ export type StoredUser = {
   createdAt: string;
 };
 
-const DATA_DIR = path.join(process.cwd(), "data");
+const DATA_DIR =
+  process.env.VERCEL === "1"
+    ? path.join("/tmp", "devpost-pro-data")
+    : path.join(process.cwd(), "data");
 const USERS_FILE = path.join(DATA_DIR, "users.json");
 
 async function ensureStore() {
