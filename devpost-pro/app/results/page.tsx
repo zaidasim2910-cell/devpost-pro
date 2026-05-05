@@ -11,6 +11,7 @@ import { TrustDisclaimerBanner } from "@/components/TrustDisclaimerBanner";
 import { TrustScoreCard } from "@/components/TrustScoreCard";
 import { RESULTS_STORAGE_KEY } from "@/lib/constants";
 import { blobToBase64 } from "@/lib/blob";
+import { trackEvent } from "@/lib/analytics";
 import { friendlyError } from "@/lib/errors";
 import type { AnalyzeSuccess, Post } from "@/lib/types";
 import { isAnalyzeSuccess } from "@/lib/types";
@@ -81,11 +82,19 @@ export default function ResultsPage() {
 
   const buildExportText = useCallback(() => {
     if (!selectedPost || !data) return "";
-    const hashtags = selectedPost.hashtags.join(" ");
+    const lines = selectedPost.content.split("\n").map((l) => l.trim()).filter(Boolean);
+    const hook = lines[0] || "";
+    const caption = selectedPost.content.trim();
+    const hashtags = selectedPost.hashtags.join(" ").trim();
     const repo = data.profile.github.url;
-    return `${selectedPost.content}\n\n${hashtags}${
-      repo ? `\n\n${repo}` : ""
-    }`.trim();
+    return [
+      hook ? `Hook:\n${hook}` : "",
+      `Caption:\n${caption}`,
+      hashtags ? `Hashtags:\n${hashtags}` : "",
+      repo ? `Project link:\n${repo}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
   }, [data, selectedPost]);
 
   async function copySelected() {
@@ -145,6 +154,7 @@ export default function ResultsPage() {
       if (layer) {
         layer.push({ event: "devpost_one_click_export" });
       }
+      trackEvent("one_click_export");
     } catch (e) {
       setOneClickHint(friendlyError(e, "Could not finish export."));
     } finally {
@@ -194,6 +204,7 @@ export default function ResultsPage() {
         return;
       }
       setPostSuccess(payload as { post_url?: string; message?: string });
+      trackEvent("linkedin_post_success");
       setConfirmOpen(false);
     } catch (e) {
       setPostError(friendlyError(e, "Couldn’t publish to LinkedIn."));

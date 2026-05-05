@@ -1,12 +1,14 @@
 "use client";
 
 import { CheckCircle2, Linkedin, Sparkles } from "lucide-react";
-import { signIn, useSession } from "next-auth/react";
+import Link from "next/link";
+import { signIn, signOut, useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { InputForm, type Tone } from "@/components/InputForm";
 import { LoadingScreen } from "@/components/LoadingScreen";
 import { RejectionScreen } from "@/components/RejectionScreen";
+import { trackEvent } from "@/lib/analytics";
 import { friendlyError } from "@/lib/errors";
 import { RESULTS_STORAGE_KEY } from "@/lib/constants";
 import type { AnalyzeRejected, AnalyzeResponse } from "@/lib/types";
@@ -44,6 +46,7 @@ export default function HomePage() {
       setLinkedinModal(true);
       return;
     }
+    trackEvent("analyze_submit", { tone });
 
     await submitAnalyze();
   }
@@ -85,6 +88,7 @@ export default function HomePage() {
       }
 
       if (isAnalyzeSuccess(parsed)) {
+        trackEvent("generation_success", { trust_score: parsed.trust.score });
         sessionStorage.setItem(RESULTS_STORAGE_KEY, JSON.stringify(parsed));
         router.push("/results");
         return;
@@ -162,6 +166,24 @@ export default function HomePage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
+            <Link
+              href="/pricing"
+              className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-[var(--text-primary)] hover:border-slate-300"
+            >
+              Pricing
+            </Link>
+            <Link
+              href="/feedback"
+              className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-[var(--text-primary)] hover:border-slate-300"
+            >
+              Feedback
+            </Link>
+            <Link
+              href="/referrals"
+              className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-[var(--text-primary)] hover:border-slate-300"
+            >
+              Refer
+            </Link>
             <button
               type="button"
               onClick={() => void signIn("linkedin")}
@@ -180,6 +202,22 @@ export default function HomePage() {
               <CheckCircle2 className="h-4 w-4" />
               {linkedInConnected ? "LinkedIn connected" : "LinkedIn not connected"}
             </div>
+            {status === "authenticated" ? (
+              <button
+                type="button"
+                onClick={() => void signOut({ callbackUrl: "/" })}
+                className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-[var(--text-primary)] hover:border-slate-300"
+              >
+                Sign out
+              </button>
+            ) : (
+              <Link
+                href="/auth/signin"
+                className="rounded-full bg-[var(--text-primary)] px-4 py-2 text-sm font-semibold text-white"
+              >
+                Sign in
+              </Link>
+            )}
           </div>
         </header>
 
